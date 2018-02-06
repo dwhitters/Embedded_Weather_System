@@ -1,5 +1,10 @@
-/* --COPYRIGHT--,BSD_EX
- * Copyright (c) 2013, Texas Instruments Incorporated
+/*
+ * -------------------------------------------
+ *    MSP432 DriverLib - v3_21_00_05 
+ * -------------------------------------------
+ *
+ * --COPYRIGHT--,BSD,BSD
+ * Copyright (c) 2016, Texas Instruments Incorporated
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,45 +33,138 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *******************************************************************************
- *
- *                       MSP432 CODE EXAMPLE DISCLAIMER
- *
- * MSP432 code examples are self-contained low-level programs that typically
- * demonstrate a single peripheral function or device feature in a highly
- * concise manner. For this the code may rely on the device's power-on default
- * register values and settings such as the clock configuration and care must
- * be taken when combining code from several examples to avoid potential side
- * effects. Also see http://www.ti.com/tool/mspdriverlib for an API functional
- * library & https://dev.ti.com/pinmux/ for a GUI approach to peripheral configuration.
- *
  * --/COPYRIGHT--*/
-//******************************************************************************
-//   MSP432P401 Demo - Software Toggle P1.0
-//
-//   Description: Toggle P1.0 by xor'ing P1.0 inside of a software loop.
-//   ACLK = 32.768kHz, MCLK = SMCLK = default DCO~1MHz
-//
-//                MSP432P401x
-//             -----------------
-//         /|\|                 |
-//          | |                 |
-//          --|RST              |
-//            |                 |
-//            |             P1.0|-->LED
-//
-//   William Goh
-//   Texas Instruments Inc.
-//   June 2016 (updated) | November 2013 (created)
-//   Built with CCSv6.1, IAR, Keil, GCC
-//******************************************************************************
-#include "msp.h"
+/******************************************************************************
+ * MSP432 Empty Project
+ *
+ * Description: An empty project that uses DriverLib
+ *
+ *                MSP432P401
+ *             ------------------
+ *         /|\|                  |
+ *          | |                  |
+ *          --|RST               |
+ *            |                  |
+ *            |                  |
+ *            |                  |
+ *            |                  |
+ *            |                  |
+ * Author: 
+*******************************************************************************/
+/* DriverLib Includes */
+#include "driverlib.h"
+
+/* Standard Includes */
 #include <stdint.h>
+#include <stdbool.h>
 
-int main(void) {
-    volatile uint32_t i;
+/** The number of ADC pins used. */
+#define NUM_ADC_READS 2u
 
-    WDT_A->CTL = WDT_A_CTL_PW |             // Stop WDT
-                 WDT_A_CTL_HOLD;
+/** Holds the multi-sequence ADC read values. */
+uint16_t ADC_Vals[NUM_ADC_READS] = {0};
+/** Holds the normalized ADC read values. */
+float Normalized_ADC_Vals[NUM_ADC_READS] = {0};
+
+void clockInit48MHzXTL(void) {  /* Sets the clock module to use the external 48 MHz crystal. */
+    /* Configuring pins for peripheral/crystal usage */
+    MAP_GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_PJ,
+            GPIO_PIN3 | GPIO_PIN2, GPIO_PRIMARY_MODULE_FUNCTION);
+    MAP_GPIO_setAsOutputPin(GPIO_PORT_P1, GPIO_PIN0);
+
+    CS_setExternalClockSourceFrequency(32000,48000000); /* Enables getMCLK, getSMCLK to know externally set frequencies. */
+
+    /* Starting HFXT in non-bypass mode without a timeout. Before we start
+     * we have to change VCORE to 1 to support the 48MHz frequency */
+    MAP_PCM_setCoreVoltageLevel(PCM_VCORE1);
+    MAP_FlashCtl_setWaitState(FLASH_BANK0, 2);
+    MAP_FlashCtl_setWaitState(FLASH_BANK1, 2);
+    CS_startHFXT(false);  // false means that there are no timeouts set, will return when stable
+
+    /* Initializing MCLK to HFXT (effectively 48MHz) */
+    MAP_CS_initClockSignal(CS_MCLK, CS_HFXTCLK_SELECT, CS_CLOCK_DIVIDER_1);
+}
+
+/**
+    Initializes the systick timer to trigger an interrupt every 0.5 seconds.
+ */
+void SystickInit(void)
+{
+    /* Configuring SysTick to trigger at 1500000 (MCLK is 3MHz so this will make
+     * it toggle every 0.5s) */
+    SysTick_enableModule();
+    SysTick_setPeriod(1500000);
+    SysTick_enableInterrupt();
+}
+
+/**
+    Systick interrupt handler. Triggers an ADC14 conversion.
+ */
+void SysTick_Handler(void)
+{
+    /* Get the results of the last conversion. */
+    ADC14_getMultiSequenceResult(ADC_Vals);
+
+    int i = 0;
+    for(i = 0; i < NUM_ADC_READS; ++i)
+    {
+        /* (Result x Ref_Voltage) / Max_14_bit_val */
+        Normalized_ADC_Vals[i] = (ADC_Vals[i] * 1.2) / 16384;
+    }
+
+    /* Trigger a new conversion. The results will be checked next time this interrupt is handled. */
+    ADC14_toggleConversionTrigger();
+}
+
+int main(void)
+{
+    /* Stop Watchdog  */
+    MAP_WDT_A_holdTimer();
+
+    /* Init functions. */
+    clockInit48MHzXTL();
+    SystickInit();
+
+    /* Setting reference voltage to 1.2V and enabling reference */
+    REF_A_setReferenceVoltage(REF_A_VREF1_2V);
+    REF_A_enableReferenceVoltage();
+
+    /* Conserve power usage by only setting the reference voltage when converting. */
+    (void)ADC14_enableReferenceBurst();
+
+    /* Setting Flash wait state */
+    MAP_FlashCtl_setWaitState(FLASH_BANK0, 2);
+    MAP_FlashCtl_setWaitState(FLASH_BANK1, 2);
+
+    /* Enabling the FPU for floating point operation */
+    MAP_FPU_enableModule();
+    MAP_FPU_enableLazyStacking();
+
+    /* Initializing ADC (MCLK/4/4) = 3MHz */
+    MAP_ADC14_enableModule();
+    MAP_ADC14_initModule(ADC_CLOCKSOURCE_MCLK, ADC_PREDIVIDER_4, ADC_DIVIDER_4,
+            0);
+
+    /* Configuring GPIOs (5.5 A0) */
+    MAP_GPIO_setAsPeripheralModuleFunctionInputPin(GPIO_PORT_P5, GPIO_PIN5,
+                                                   GPIO_TERTIARY_MODULE_FUNCTION);
+    /* Configuring ADC Memory */
+    MAP_ADC14_configureMultiSequenceMode(ADC_MEM0, ADC_MEM1, false);
+    /* Configure ADC memory for the photo-resistor. */
+    MAP_ADC14_configureConversionMemory(ADC_MEM0, ADC_VREFPOS_INTBUF_VREFNEG_VSS,
+                                        ADC_INPUT_A0, false);
+    /* Configure ADC memory for the TMP36. */
+    MAP_ADC14_configureConversionMemory(ADC_MEM1, ADC_VREFPOS_INTBUF_VREFNEG_VSS,
+                                        ADC_INPUT_A1, false);
+
+    /* Configuring Sample Timer */
+    MAP_ADC14_enableSampleTimer(ADC_MANUAL_ITERATION);
+
+    /* Enabling/Toggling Conversion */
+    MAP_ADC14_enableConversion();
+
+    while(1)
+    {
+        MAP_PCM_gotoLPM0(); /* Sleep until an interrupt occurs. */
+    }
 }
