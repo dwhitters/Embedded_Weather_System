@@ -1,4 +1,5 @@
 Release/*
+Debug/*
 .xdchelp
 config/*
 .launches/*
