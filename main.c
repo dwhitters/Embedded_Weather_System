@@ -58,6 +58,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "ST7735.h"
+
 /** The number of ADC pins used. */
 #define NUM_ADC_READS 2u
 
@@ -86,21 +88,9 @@ void clockInit48MHzXTL(void) {  /* Sets the clock module to use the external 48 
 }
 
 /**
-    Initializes the systick timer to trigger an interrupt every 0.5 seconds.
+    Interrupt handler for Timer32. Triggers an ADC14 conversion.
  */
-void SystickInit(void)
-{
-    /* Configuring SysTick to trigger at 1500000 (MCLK is 3MHz so this will make
-     * it toggle every 0.5s) */
-    SysTick_enableModule();
-    SysTick_setPeriod(1500000);
-    SysTick_enableInterrupt();
-}
-
-/**
-    Systick interrupt handler. Triggers an ADC14 conversion.
- */
-void SysTick_Handler(void)
+void Timer32_0_IRQ(void)
 {
     /* Get the results of the last conversion. */
     ADC14_getMultiSequenceResult(ADC_Vals);
@@ -114,6 +104,22 @@ void SysTick_Handler(void)
 
     /* Trigger a new conversion. The results will be checked next time this interrupt is handled. */
     ADC14_toggleConversionTrigger();
+
+    Timer32_clearInterruptFlag(TIMER32_0_BASE); /* Clear the interrupt flag. */
+}
+
+/*
+ * Timer32_0 Setup
+ */
+void Timer32_0_Init(void) {
+    Timer32_initModule(TIMER32_0_BASE, TIMER32_PRESCALER_1, TIMER32_32BIT,
+                       TIMER32_PERIODIC_MODE);
+    Timer32_registerInterrupt(TIMER32_0_INTERRUPT, Timer32_0_IRQ);
+    Timer32_clearInterruptFlag(TIMER32_0_BASE);
+    /* Set the timer to trigger an interrupt every 500ms. */
+    Timer32_setCount(TIMER32_0_BASE, 24000000);
+    Timer32_startTimer(TIMER32_0_BASE, false);
+    Timer32_enableInterrupt(TIMER32_0_BASE);
 }
 
 int main(void)
@@ -123,7 +129,7 @@ int main(void)
 
     /* Init functions. */
     clockInit48MHzXTL();
-    SystickInit();
+    Timer32_0_Init();
 
     /* Setting reference voltage to 1.2V and enabling reference */
     REF_A_setReferenceVoltage(REF_A_VREF1_2V);

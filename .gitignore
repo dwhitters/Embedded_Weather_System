@@ -5,3 +5,6 @@ config/*
 .launches/*
 .ccsproject
 .cproject
+.project
+.settings
+MSP432P401R.ccxml
