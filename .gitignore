@@ -8,3 +8,4 @@ config/*
 .project
 .settings
 MSP432P401R.ccxml
+driverlib_empty_project_ccs.cmd
